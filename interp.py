@@ -663,8 +663,14 @@ def _kaiser_bessel_kernel_v1(x, beta):
 
 def _kaiser_bessel_kernel(x, beta):
     beta = tf.cast(beta, x.dtype)
-    kern = tf.math.bessel_i0(beta * tf.sqrt(1 - x ** 2))
-    return tf.where(tf.abs(x)>1, 0., kern)
+    # we need to use the repeated tf.where functions
+    # to avoid NaN gradients when either branch generates
+    # a nan, even though the result comes from the other branch.
+    # this is documented in tf.where documentation as well as
+    # in https://github.com/tensorflow/tensorflow/issues/38349.
+    safe_x = tf.where(tf.abs(x) > 1., 0., x)
+    kern = tf.math.bessel_i0(beta * tf.sqrt(1 - safe_x ** 2))
+    return tf.where(tf.abs(x) > 1., 0., kern)
 
 
 def _griddingn(output_tensor, input_tensor, coord, width, param, kernel):
