@@ -666,190 +666,6 @@ def _kaiser_bessel_kernel(x, beta):
     kern = tf.math.bessel_i0(beta * tf.sqrt(1 - x ** 2))
     return tf.where(tf.abs(x)>1, 0., kern)
 
-def _get_interpolate(kernel):
-    if kernel == 'spline':
-        kernel = _spline_kernel
-    elif kernel == 'kaiser_bessel':
-        kernel = _kaiser_bessel_kernel
-
-    def _interpolate1(output_tensor, input_tensor, coord, width, param):
-        batch_size = tf.shape(input_tensor)[0]
-        nx = tf.shape(input_tensor)[1]
-        npts = tf.shape(coord)[0]
-
-        for i in range(npts):
-            kx = coord[i, -1]
-
-            x0 = tf.math.ceil(kx - width[-1] / 2)
-            x1 = tf.math.floor(kx + width[-1] / 2)
-
-            for x in range(x0, x1 + 1):
-
-                w = kernel((x - kx) / (width[-1] / 2), param[-1])
-
-                for b in range(batch_size):
-                    output_tensor[b, i] += w * input_tensor[b, x % nx]
-
-        return output_tensor
-
-    def _interpolate2(output_tensor, input_tensor, coord, width, param):
-
-        batch_size, ny, nx = input_tensor.shape
-        npts = coord.shape[0]
-
-        for i in range(npts):
-            kx, ky = coord[i, -1], coord[i, -2]
-
-            x0, y0 = (np.ceil(kx - width[-1] / 2),
-                      np.ceil(ky - width[-2] / 2))
-
-            x1, y1 = (np.floor(kx + width[-1] / 2),
-                      np.floor(ky + width[-2] / 2))
-
-            for y in range(y0, y1 + 1):
-                wy = kernel((y - ky) / (width[-2] / 2), param[-2])
-
-                for x in range(x0, x1 + 1):
-                    w = wy * kernel((x - kx) / (width[-1] / 2), param[-1])
-
-                    for b in range(batch_size):
-                        output_tensor[b, i] += w * input_tensor[b, y % ny, x % nx]
-
-        return output_tensor
-
-    def _interpolate3(output_tensor, input_tensor, coord, width, param):
-        batch_size, nz, ny, nx = input_tensor.shape
-        npts = coord.shape[0]
-
-        for i in range(npts):
-            kx, ky, kz = coord[i, -1], coord[i, -2], coord[i, -3]
-
-            x0, y0, z0 = (np.ceil(kx - width[-1] / 2),
-                          np.ceil(ky - width[-2] / 2),
-                          np.ceil(kz - width[-3] / 2))
-
-            x1, y1, z1 = (np.floor(kx + width[-1] / 2),
-                          np.floor(ky + width[-2] / 2),
-                          np.floor(kz + width[-3] / 2))
-
-            for z in range(z0, z1 + 1):
-                wz = kernel((z - kz) / (width[-3] / 2), param[-3])
-
-                for y in range(y0, y1 + 1):
-                    wy = wz * kernel((y - ky) / (width[-2] / 2), param[-2])
-
-                    for x in range(x0, x1 + 1):
-                        w = wy * kernel((x - kx) / (width[-1] / 2), param[-1])
-
-                        for b in range(batch_size):
-                            output_tensor[b, i] += w * input_tensor[
-                                b, z % nz, y % ny, x % nx]
-
-        return output_tensor
-
-    return _interpolate1, _interpolate2, _interpolate3
-
-
-def _gridding1(output_tensor, input_tensor, coord, width, param, kernel):
-    batch_size = tf.shape(output_tensor)[0]
-    nx = tf.shape(output_tensor)[-1]
-    npts = tf.shape(coord)[0]
-
-    for i in range(npts):
-        kx = coord[i, -1]
-
-        x0 = tf.math.ceil(kx - width[-1] / 2)
-        x1 = tf.math.floor(kx + width[-1] / 2)
-        
-        x = tf.range(x0, x1+1)
-        w = kernel((x - kx) / (width[-1] / 2), param[-1])
-
-        output_tensor = tf.tensor_scatter_nd_add(
-            tf.transpose(output_tensor),
-            tf.cast(x[:,tf.newaxis], nx.dtype) % nx,
-            tf.transpose(w * tf.gather(input_tensor, [i], axis=1))
-        )
-        output_tensor = tf.transpose(output_tensor)
-    return output_tensor
-
-
-def _gridding2(output_tensor, input_tensor, coord, width, param, kernel):
-    batch_size = tf.shape(output_tensor)[0]
-    nx = tf.shape(output_tensor)[-1]
-    ny = tf.shape(output_tensor)[-2]
-    npts = tf.shape(coord)[0]
-
-    for i in range(npts):
-        kx = coord[i, -1]
-        ky = coord[i, -2]
-
-        x0, y0 = (tf.math.ceil(kx - width[-1] / 2),
-                    tf.math.ceil(ky - width[-2] / 2))
-
-        x1, y1 = (tf.math.floor(kx + width[-1] / 2),
-                    tf.math.floor(ky + width[-2] / 2))
-        
-        y = tf.range(y0, y1 + 1)
-        x = tf.range(x0, x1 + 1)
-        
-        wy = kernel((y - ky) / (width[-2] / 2), param[-2])
-        wx = kernel((x - kx) / (width[-1] / 2), param[-1])
-        w = wy[:, tf.newaxis] * wx[tf.newaxis, :]
-
-        output_tensor = tf.tensor_scatter_nd_add(
-            tf.transpose(output_tensor, perm=[1,2,0]),
-            util.cartesian_product((tf.cast(y, ny.dtype) % ny, 
-                                    tf.cast(x, nx.dtype) % nx)),
-            tf.transpose(w * tf.gather(input_tensor, [[i]], axis=1), perm=[1,2,0])
-        )
-        output_tensor = tf.transpose(output_tensor, perm=[2,0,1])
-    return output_tensor
-
-
-def _gridding3(output_tensor, input_tensor, coord, width, param, kernel):
-    batch_size = tf.shape(output_tensor)[0]
-    nx = tf.shape(output_tensor)[-1]
-    ny = tf.shape(output_tensor)[-2]
-    nz = tf.shape(output_tensor)[-3]
-    npts = tf.shape(coord)[0]
-
-    for i in range(npts):
-        kx = coord[i, -1]
-        ky = coord[i, -2]
-        kz = coord[i, -3]
-
-        x0, y0, z0 = (tf.math.ceil(kx - width[-1] / 2),
-                        tf.math.ceil(ky - width[-2] / 2),
-                        tf.math.ceil(kz - width[-3] / 2))
-
-        x1, y1, z1 = (tf.math.floor(kx + width[-1] / 2),
-                        tf.math.floor(ky + width[-2] / 2),
-                        tf.math.floor(kz + width[-3] / 2))
-        
-        z = tf.range(z0, z1 + 1)
-        y = tf.range(y0, y1 + 1)
-        x = tf.range(x0, x1 + 1)
-
-        wz = kernel((z - kz) / (width[-3] / 2), param[-3])
-        wy = kernel((y - ky) / (width[-2] / 2), param[-2])
-        wx = kernel((x - kx) / (width[-1] / 2), param[-1])
-        w = (
-            wz[:, tf.newaxis, tf.newaxis]
-            * wy[tf.newaxis, :, tf.newaxis]
-            * wx[tf.newaxis, tf.newaxis, :]
-        )
-
-        output_tensor = tf.tensor_scatter_nd_add(
-            tf.transpose(output_tensor, perm=[1,2,3,0]),
-            util.cartesian_product((tf.cast(z, nz.dtype) % nz, 
-                                    tf.cast(y, ny.dtype) % ny,
-                                    tf.cast(x, nx.dtype) % nx)),
-            tf.transpose(w * tf.gather(input_tensor, [[[i]]], axis=1), perm=[1,2,3,0])
-        )
-
-        output_tensor = tf.transpose(output_tensor, perm=[3,0,1,2])
-    return output_tensor
-
 
 def _griddingn(output_tensor, input_tensor, coord, width, param, kernel):
     batch_size = tf.shape(output_tensor)[0]
@@ -876,6 +692,7 @@ def _griddingn(output_tensor, input_tensor, coord, width, param, kernel):
         for ii in range(len(coord_indices)):
             kern = kernel((coord_indices[ii] - ks[ii]) / (width[ii] / 2), param[ii])
             w = w[...,tf.newaxis] * tf.reshape(kern, tf.concat([tf.ones([ii],dtype=tf.int32),[-1]], axis=0))
+        w = tf.cast(w, dtype=input_tensor.dtype)
 
         # TF way to do output_tensor[:, *coord_indices_circular] += w[None] * input_tensor[:,i]
         output_tensor = tf.tensor_scatter_nd_add(
@@ -959,7 +776,8 @@ def _interpolaten(output_tensor, input_tensor, coord, width, param, kernel):
         for ii in range(len(coord_indices)):
             kern = kernel((coord_indices[ii] - ks[ii]) / (width[ii] / 2), param[ii])
             w = w[...,tf.newaxis] * tf.reshape(kern, tf.concat([tf.ones([ii],dtype=tf.int32),[-1]], axis=0))
-        
+        w = tf.cast(w, dtype=input_tensor.dtype)
+
         ranges = util.cartesian_product(coord_indices_circular)
         input_tensor_selected_entries = tf.gather_nd(
             tf.transpose(input_tensor, perm=tf.roll(tf.range(ndim+1), shift=-1, axis=0)),
