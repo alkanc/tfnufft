@@ -30,3 +30,15 @@ The computation times can be obtained by running the following commands
 <pre><code>python profile_tfnufft.py
 python profile_tfnufft_precomputed.py
 </code></pre>
+
+# About
+If you use this library for your work, please consider citing the following work:
+
+    @misc{alkan2023autosamp,
+          title={AutoSamp: Autoencoding MRI Sampling via Variational Information Maximization}, 
+          author={Cagan Alkan and Morteza Mardani and Shreyas S. Vasanawala and John M. Pauly},
+          year={2023},
+          eprint={2306.02888},
+          archivePrefix={arXiv},
+          primaryClass={eess.IV}
+    }
